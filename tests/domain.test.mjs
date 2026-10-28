@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {DAY,clock,split,progress,validateGoal,validateState,newState,parseLocal,localInput} from '../dist/domain.mjs';
+const n=Date.UTC(2026,9,28,10),goal=()=>({id:'test-1',title:'Цель',description:'',category:'health',startAt:n,deadlineAt:n+10*DAY,durationMs:DAY,createdAt:n,updatedAt:n,completedAt:null,actions:[]});
+test('elapsed derives from timestamps after closing, never from interval ticks',()=>{assert.equal(clock(goal(),n+3*DAY+123000).elapsed,3*DAY+123000);});
+test('future start clamps elapsed and time progress',()=>{const g=goal(),c=clock(g,n-1000);assert.equal(c.elapsed,0);assert.equal(c.scheduled,true);assert.equal(c.timeProgress,0);});
+test('deadline and timer independent, overdue clamps remaining',()=>{const g=goal();assert.equal(clock(g,n+2*DAY).timerExpired,true);assert.equal(clock(g,n+2*DAY).daysLeft,8);assert.equal(clock(g,n+11*DAY).remaining,0);assert.equal(clock(g,n+11*DAY).overdue,true);assert.equal(clock(g,n+11*DAY).timeProgress,100);});
+test('days ceil partial days; exact deadline has zero remaining',()=>{assert.equal(clock(goal(),n+9*DAY+1).daysLeft,1);assert.equal(clock(goal(),n+10*DAY).daysLeft,0);});
+test('completed goal freezes all clocks',()=>{const g={...goal(),completedAt:n+DAY};assert.equal(clock(g,n+100*DAY).elapsed,DAY);assert.equal(clock(g,n+100*DAY).overdue,false);});
+test('duration splitting at boundaries and after 100 days',()=>{assert.deepEqual(split(-1),[0,0,0,0]);assert.deepEqual(split(86400000-1),[0,23,59,59]);assert.deepEqual(split(103*DAY+3661000),[103,1,1,1]);});
+test('action progress independent from time',()=>{const g=goal();g.actions=[{id:'1',title:'Один',doneAt:n},{id:'2',title:'Два',doneAt:null},{id:'3',title:'Три',doneAt:null}];assert.equal(progress(g),33);assert.equal(progress(goal()),0);});
+test('reject invalid dates, durations, data and duplicate IDs',()=>{for(const patch of [{title:' '},{deadlineAt:n},{startAt:NaN},{durationMs:0},{durationMs:Infinity},{completedAt:n-1},{category:'invalid'}])assert.throws(()=>validateGoal({...goal(),...patch}));assert.throws(()=>validateState({version:1,goals:[goal(),goal()],events:[]}));assert.throws(()=>validateState({version:2,goals:[],events:[]}));assert.doesNotThrow(()=>validateGoal(goal()));assert.doesNotThrow(()=>validateState(newState()));});
+test('datetime input roundtrips including local timezone',()=>{const value=localInput(n);assert.equal(localInput(parseLocal(value)),value);assert.throws(()=>parseLocal('not a date'));assert.throws(()=>parseLocal('2026-02-31T10:00'));});
+test('malicious imported text stays data; state validates structural constraints',()=>{const g=goal();g.title='<img src=x onerror=alert(1)>';assert.equal(validateGoal(g).title,g.title);g.actions=[{id:'a',title:'Шаг',doneAt:null},{id:'a',title:'Шаг',doneAt:null}];assert.throws(()=>validateGoal(g));});
